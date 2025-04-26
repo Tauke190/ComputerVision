@@ -42,7 +42,7 @@ def image_convolution(input, kernel, mode='full'):
     return output
 
 
-class convultion:
+class convolution:
     def __init__(self,input_shape,kernel_size,depth):
         input_depth, input_height, input_width = input_shape
         #defining the attributes for forward and backward methods
@@ -74,7 +74,7 @@ class convultion:
 
         for i in range(self.depth):
             for j in range(self.input_depth):
-                 kernels_gradient[i, j] = image_correlation(self.input[j],output_gradient[i],'valid')
+                 kernels_gradient[i, j] = image_correlation(self.input[j],output_gradient[i],"valid")
                  #computing the gradients with respect to input
                  input_gradient[j] += image_convolution(output_gradient[i], self.kernels[i, j], "full")
 
@@ -88,6 +88,7 @@ class convultion:
 class sigmoid:
     def forward(self, x):
         self.output = 1 / (1 + np.exp(-x))
+        return self.output
 
     def backward(self, output_gradient):
         # The derivative of the sigmoid function is sigmoid(x) * (1 - sigmoid(x))
@@ -131,6 +132,7 @@ class average_pooling:
                     # and storing it in the corresponding position in the output
                     output[d, i // self.stride, j // self.stride] = np.mean(window)
 
+        return output
 
     def backward(self,output_gradient):
         depth, input_height, input_width = self.input_shape
@@ -171,4 +173,147 @@ class dense_layer:
       #  print(eval.shape) = 10,
         return eval
 
+    def backward(self , output_gradient, learning_rate):
+
+        # Gradient of loss w.r.t. weights
+        weights_gradient = np.dot(output_gradient.reshape(-1,1) , self.input.reshape(1,-1))
+
+        # Gradient of loss w.r.t. biases
+        biases_gradient = output_gradient
+
+        # Gradient computation of loss w.r.t. input
+        input_gradient = np.dot(self.weights.T,output_gradient)
+
+        # Updating weights and biases
+        self.weights -= learning_rate * weights_gradient
+        self.biases -= learning_rate * biases_gradient
+
+        return input_gradient    
     
+
+class softmax:
+    def forward(self,input):
+        exps = np.exp(input - np.max(input, axis=-1, keepdims=True))
+        self.output = exps / np.sum(exps, axis=-1, keepdims=True)
+        return self.output
+    
+    def backward(self, dL_dZ):
+        return dL_dZ
+    
+    
+class cross_entropy_loss:
+    def __init__(self):
+        pass
+
+    def compute_loss(self, t_list , p_list):
+        #Ensure inputs are 2D arrays
+        t_list = np.atleast_2d(np.float_(t_list))
+        p_list = np.atleast_2d(np.float_(p_list))
+        # compute cross entropy loss
+        losses = -np.sum(t_list * np.log(p_list + 1e-15),axis =1)
+        return np.mean(losses)
+    
+    def compute_dloss(self,t_list,p_list):
+        return p_list - t_list
+
+#one hot code for all the labels
+def one_hot_encode(y):
+    one_hot = np.zeros((y.size, y.max()+1))
+    one_hot[np.arange(y.size), y] = 1
+    return one_hot
+
+(train_images, train_labels), (test_images, test_labels) = mnist.load_data()
+
+
+#batch,num_imgs,w,h and normalize
+train_images = train_images.reshape((-1, 1, 28, 28)) / 255.0  
+test_images = test_images.reshape((-1, 1, 28, 28)) / 255.0
+
+train_labels = one_hot_encode(train_labels)
+test_labels = one_hot_encode(test_labels)
+
+
+#Intialize layers
+
+cnn_layer = convolution(input_shape=(1,28,28),kernel_size=3,depth=2) # depth = no of kernels
+sigmoid_layer = sigmoid()
+avg_pooling_layer = average_pooling(input_shape=(2,26,26),pool_size=2,stride=2)
+flatten_layer = flatten()
+denselayer = dense_layer(input_size=(13*13*2),output_size=10)
+softmax_layer = softmax()
+cross_entropy_layer = cross_entropy_loss()
+
+
+#hyperparameters
+num_epochs = 10
+learning_rate = 0.01
+
+# Store results over time
+train_accuracies = []
+train_losses = []
+
+train_images = train_images[:1000]
+
+for epoch in range(num_epochs):
+    correct_train_predictions = 0
+    total_loss = 0
+
+    #loop over all the images
+    for i in range(len(train_images)):
+        image = train_images[i]
+        label = train_labels[i]
+
+        cnn_output = cnn_layer.forward(image)
+        sigmoid_output = sigmoid_layer.forward(cnn_output)
+        avg_pooling_output = avg_pooling_layer.forward(sigmoid_output)
+        flatten_output = flatten_layer.forward(avg_pooling_output)
+        dense_output = denselayer.forward(flatten_output)
+        predictions = softmax_layer.forward(dense_output)
+
+        loss = cross_entropy_layer.compute_loss(label,predictions)
+        total_loss += loss
+
+        if(np.argmax(predictions) == np.argmax(label)):
+            correct_train_predictions += 1
+        # Back pass
+        grad_back = cross_entropy_layer.compute_dloss(label,predictions)
+
+        grad_back = softmax_layer.backward(grad_back)
+
+
+        grad_back = denselayer.backward(grad_back,learning_rate)
+
+        # print("Gradient norm:", np.linalg.norm(grad_back))
+
+
+      
+        grad_back = flatten_layer.backward(grad_back)
+       
+        grad_back = avg_pooling_layer.backward(grad_back)
+    
+        grad_back = sigmoid_layer.backward(grad_back)
+        grad_back = cnn_layer.backward(grad_back,learning_rate)
+
+
+    train_accuracy = correct_train_predictions/len(train_images)
+    average_loss = total_loss/len(train_images)
+
+    train_accuracies.append(train_accuracy)
+    train_losses.append(average_loss)
+
+    # Print summary after each epoch
+    print(f"Epoch {epoch + 1}, Training Accuracy: {train_accuracy * 100:.2f}%, Average Loss: {average_loss:.4f}")    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
